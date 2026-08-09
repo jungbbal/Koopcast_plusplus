@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tsca-net"
+version = "1.0.0"
+description = "TSCA-Net: Temporal-Spatial Clique Attention for Interpretable Multimodal Pedestrian Trajectory Prediction"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Md Mustafizur Rahman" },
+    { name = "Guangchao Yang" },
+    { name = "A F M Abdun Noor" },
+    { name = "Md Imam Ahasan" },
+    { name = "Md Mahfuzur Rahman" },
+    { name = "Md Ariful Islam" },
+]
+keywords = [
+    "trajectory-prediction",
+    "pedestrian-trajectory-prediction",
+    "attention",
+    "kolmogorov-arnold-networks",
+    "autonomous-driving",
+    "social-robots",
+    "pytorch",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+    "seaborn>=0.12",
+    "tqdm>=4.64",
+    "tensorboard>=2.12",
+    "Pillow>=9.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "black>=23.0", "ruff>=0.4", "isort>=5.12"]
+
+[project.urls]
+Homepage = "https://github.com/imamahasane/TSCA-Net"
+Repository = "https://github.com/imamahasane/TSCA-Net"
+Issues = "https://github.com/imamahasane/TSCA-Net/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.black]
+line-length = 119
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py39"
+
+[tool.ruff.lint]
+# E741 (ambiguous variable name `I`) is intentionally ignored: `I` is the
+# fused input-map symbol used throughout the paper (Sec. II-B, Eq. 1) and
+# is kept identical in the code for direct equation<->code traceability
+# (see docs/ARCHITECTURE.md).
+ignore = ["E741"]
+
+[tool.isort]
+profile = "black"
+line_length = 119

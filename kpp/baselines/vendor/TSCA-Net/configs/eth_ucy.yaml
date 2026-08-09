@@ -1,0 +1,21 @@
+obs_len: 8
+pred_len: 12
+num_samples: 20
+map_h: 256
+map_w: 256
+
+social_radius: 3.0
+
+lr_goal: 0.0003
+lr_pred: 0.0003
+weight_decay: 0.0001
+epochs: 100
+batch_size: 32
+
+use_tsca: true
+use_cpcp: true
+use_akgr: true
+
+data_root: ./data/eth_ucy
+ckpt_dir: ./checkpoints/eth_ucy
+log_dir: ./runs/eth_ucy

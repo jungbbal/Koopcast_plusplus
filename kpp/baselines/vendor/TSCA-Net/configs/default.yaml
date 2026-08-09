@@ -1,0 +1,46 @@
+obs_len: 8
+pred_len: 12
+num_samples: 20
+map_h: 256
+map_w: 256
+max_neighbors: 16
+
+scene_channels: 2
+heatmap_channels: 1
+heatmap_sigma: 4.0
+
+temporal_embed_dim: 16
+tsca_sample_K: 20
+
+social_radius: 3.0
+social_radius_px: 50.0
+social_embed_dim: 64
+
+kan_base_grid: 5
+kan_spline_order: 3
+kan_hidden_dim: 256
+kan_output_dim: 16
+kan_min_grid: 3
+kan_max_grid: 10
+
+lstm_hidden_dim: 256
+
+lr_goal: 0.0001
+lr_pred: 0.00003
+weight_decay: 0.0001
+grad_clip: 1.0
+epochs: 100
+patience: 15
+batch_size: 8
+num_workers: 0
+
+lambda1: 1.0
+lambda2: 1.0
+
+use_tsca: true
+use_cpcp: true
+use_akgr: true
+
+data_root: ./data
+ckpt_dir: ./checkpoints
+log_dir: ./runs/tsca_net

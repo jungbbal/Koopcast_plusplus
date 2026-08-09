@@ -1,0 +1,11 @@
+
+torch==2.8.0          # verified
+numpy==2.0.2           # verified
+pandas==2.3.3           # verified
+tqdm==4.68.4            # verified
+tensorboard==2.21.0     # verified
+Pillow==11.3.0          # verified
+scipy>=1.9              # not individually verified
+matplotlib>=3.6         # not individually verified
+seaborn>=0.12           # not individually verified
+PyYAML>=6.0              # not individually verified (used by Config.from_yaml)
