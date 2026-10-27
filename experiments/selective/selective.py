@@ -34,7 +34,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
-REPO = pathlib.Path("/tmp/Koopcast_plusplus")
+REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO), str(REPO / "scripts")]
 
 from kpp.data.windows import scene_windows                     # noqa: E402
