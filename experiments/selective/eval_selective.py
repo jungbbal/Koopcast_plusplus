@@ -15,9 +15,9 @@ from kpp.data import load_ethucy, load, ETHUCY_SCENES
 from kpp.data.loaders import load_taa_npy
 from kpp.predictors import KoopCastPP
 
-ETAS = [0.0, 0.005, 0.01, 0.02, 0.05, 0.1]
-QS = [0.9, 0.95, 0.99]
-LAMS = [1e-6, 1e-5, 1e-4, 1e-3]
+ETAS = [0.05]
+QS = [0.9]
+LAMS = [1e-4]
 RIDGE = {"snu-asri": 0.1}
 HERE = pathlib.Path(__file__).parent
 CACHE = HERE / "cache"; CACHE.mkdir(exist_ok=True)
