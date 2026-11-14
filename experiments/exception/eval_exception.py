@@ -3,6 +3,17 @@ Exception-handling evaluation: static K0 by default, dedicated operators only fo
 extreme manoeuvres. Selection on val, scores on test.
 
     python eval_exception.py zara1 eth hotel univ zara2 snu-asri
+    python eval_exception.py ... --no-baselines      # KoopCast++ variants only
+
+At the end a comparison table is printed for every test scene:
+KoopCast++ (exc_ms), KoopCast++ (static), KoopCast++ (lib), SocialVAE, Social-STGCNN, Constant Velocity,
+EigenTrajectory, Trajectron++  x  ADE / FDE / excADE / excFDE
+(exc* = exception slice: sharp turn or hard accel/decel in the last 8 observed steps,
+q = REPORT_Q of the scene's training windows; identical slice for every model).
+Baselines use the vendored checkpoints of the same scene, single deterministic
+prediction, same targets (matched by scene/agent/start frame). Trajectron++ is scored
+through its own Environment (repo's evaluate_trajectron path; ETH/UCY only) and its
+exception slice is computed from the same 8-step history with the same rule.
 
 snu-asri-ood is scored after snu-asri with the configs chosen on lobby val.
 Observed-sample caches are shared with ../selective/cache.
@@ -15,7 +26,8 @@ import numpy as np
 import exception as X
 import selective as S
 import eval_selective as E                    # splits(), cached(), ridge, always-eta, lib-lambda
-from kpp.data import load
+from kpp.data import load, ETHUCY_SCENES
+from kpp.data.windows import scene_windows
 from kpp.predictors import KoopCastPP
 
 Q_HI = [0.9, 0.95, 0.99]                      # exception threshold quantile (val-selected)
@@ -32,6 +44,79 @@ def own_cached(name, fn):
     if p.exists():
         return pickle.loads(p.read_bytes())
     v = fn(); p.write_bytes(pickle.dumps(v)); return v
+
+
+# --------------------------------------------------------------------------- #
+# Baselines on the same targets
+# --------------------------------------------------------------------------- #
+BASELINES = [("socialvae", "SocialVAE"), ("stgcnn", "Social-STGCNN"), ("eigen", "EigenTrajectory")]
+TABLE_ROWS = ["KoopCast++ (exc_ms)", "KoopCast++ (static)", "KoopCast++ (lib)", "SocialVAE", "Social-STGCNN",
+              "Constant Velocity", "EigenTrajectory", "Trajectron++"]
+
+
+def target_keys(ds):
+    """(scene_id, agent_id, start_frame) per target, in the order S.prepare produces samples."""
+    return [(int(sw.scene_id), int(t.agent_id), int(t.start_frame))
+            for sw in scene_windows(ds, full_history=True) for t in sw.targets]
+
+
+def baseline_preds(name, model_scene, ds, keys, tag):
+    """(N, 12, 2) predictions aligned with keys (NaN where the model returned nothing)."""
+    p = OWN_CACHE / f"baseline_{name}_{tag}.pkl"
+    if p.exists():
+        out = pickle.loads(p.read_bytes())
+    else:
+        from kpp.baselines import make_baseline
+        pred = make_baseline(name, model_scene, pred_len=12, history_len=8, dt=0.4)
+        out = {}
+        for sw in scene_windows(ds):
+            if not sw.targets:
+                continue
+            P = pred.predict_scene(sw.obs)
+            for t in sw.targets:
+                if t.agent_id in P:
+                    out[(int(sw.scene_id), int(t.agent_id), int(t.start_frame))] = np.asarray(P[t.agent_id], float)[:12]
+        p.write_bytes(pickle.dumps(out))
+    nan = np.full((12, 2), np.nan)
+    return np.stack([out.get(k, nan) for k in keys])
+
+
+def trajectron_scores(scene, rule):
+    """Per-sample ADE/FDE of pretrained Trajectron++ (repo path) + exception flag from its own history."""
+    p = OWN_CACHE / f"trajectron_{scene}.pkl"
+    if p.exists():
+        return pickle.loads(p.read_bytes())
+    import kpp.baselines.trajectron_eval as TE
+    env = TE.load_split(scene, "test")
+    stg, _ = TE.load_trajectron(str(TE.DEFAULT_MODEL_ROOT / TE.MODEL_DIRS[scene]), env, ts=100, device="cpu")
+    ade, fde, hist = [], [], []
+    for sc in env.scenes:
+        for t in range(sc.timesteps):
+            preds = stg.predict(sc, np.array([t]), 12, num_samples=1, min_history_timesteps=7,
+                                min_future_timesteps=12, z_mode=True, gmm_mode=True, full_dist=False)
+            for _t, per_node in (preds or {}).items():
+                for node, pr in per_node.items():
+                    pr = np.asarray(pr, float).reshape(-1, 12, 2)[0]
+                    gt = np.asarray(node.get(np.array([t + 1, t + 12]), TE._STATE), float)
+                    if gt.shape[0] != 12 or not np.isfinite(gt).all():
+                        continue
+                    d = np.linalg.norm(pr - gt, axis=-1)
+                    ade.append(d.mean()); fde.append(d[-1])
+                    hist.append(np.asarray(node.get(np.array([t - 7, t]), TE._STATE), float))
+    H = np.stack(hist)
+    ok = np.isfinite(H).all(axis=(1, 2))
+    lab = np.full(len(H), X.NORMAL); lab[ok] = rule.label(H[ok])
+    r = dict(ade=np.asarray(ade), fde=np.asarray(fde), slice=lab != X.NORMAL)
+    p.write_bytes(pickle.dumps(r))
+    return r
+
+
+def table_row(ade, fde, sl):
+    ok = np.isfinite(ade)
+    return dict(ade=float(ade[ok].mean()), fde=float(fde[ok].mean()),
+                exc_ade=float(ade[ok & sl].mean()) if (ok & sl).any() else float("nan"),
+                exc_fde=float(fde[ok & sl].mean()) if (ok & sl).any() else float("nan"),
+                n=int(ok.sum()), n_exc=int((ok & sl).sum()))
 
 
 def arrays(samples):
@@ -70,8 +155,11 @@ def summarize(ade, fde, sl, cls):
 
 
 def main():
-    scenes = sys.argv[1:] or ["zara1"]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    with_baselines = "--no-baselines" not in sys.argv
+    scenes = args or ["zara1"]
     allres = {}
+    compare = {}
     for scene in scenes:
         t0 = time.time()
         model = KoopCastPP(scene)
@@ -138,6 +226,26 @@ def main():
                 cv = f"{100*cover[name]:.1f}%" if name in cover else ""
                 print(f"    {name:<10}{r['ade']:8.4f}{r['fde']:8.4f}{r['p90']:8.4f}{r['p95']:8.4f} | "
                       f"{r['exc_ade']:8.4f}{r['exc_fde']:8.4f}{r['turn_ade']:8.4f}{r['speed_ade']:8.4f}{r['normal_ade']:8.4f}  {cv}", flush=True)
+            # ---- comparison with baselines (same targets, same exception slice) ----
+            if with_baselines and tname != "snu-asri-ood":
+                tds = test_ds if tname == scene else load("snu-asri-ood")
+                keys = target_keys(tds)
+                assert len(keys) == len(ts), "target order mismatch"
+                rows = {}
+                for m, label in [("exc_ms", "KoopCast++ (exc_ms)"), ("static", "KoopCast++ (static)"),
+                                 ("lib", "KoopCast++ (lib)")]:
+                    a, f = X.errors(preds[m], Ft); rows[label] = table_row(a, f, sl)
+                cvp = Ht[:, -1][:, None] + np.arange(1, 13)[None, :, None] * (Ht[:, -1] - Ht[:, -2])[:, None]
+                a, f = X.errors(cvp, Ft); rows["Constant Velocity"] = table_row(a, f, sl)
+                for name, label in BASELINES:
+                    bp = baseline_preds(name, scene, tds, keys, tname)
+                    e = np.linalg.norm(bp - Ft, axis=2)
+                    rows[label] = table_row(e.mean(1), e[:, -1], sl)
+                if scene in ETHUCY_SCENES:
+                    tr = trajectron_scores(scene, rep_rule)
+                    rows["Trajectron++"] = table_row(tr["ade"], tr["fde"], tr["slice"])
+                compare[tname] = rows
+                print(f"    [compared with baselines: {', '.join(r for r in rows if not r.startswith('KoopCast'))}]", flush=True)
             res["_chosen"] = {k: v[0] for k, v in chosen.items()}
             res["_n"] = len(ts); res["_n_exc"] = int(sl.sum())
             allres[tname] = res
@@ -145,6 +253,37 @@ def main():
     out = HERE / f"results_{'_'.join(scenes)}.json"
     out.write_text(json.dumps(allres, indent=1))
     print("saved", out)
+    if compare:
+        print_comparison(compare)
+        (HERE / f"comparison_{'_'.join(scenes)}.json").write_text(json.dumps(compare, indent=1))
+        lines = ["scene,model,ADE,FDE,excADE,excFDE,n,n_exc"]
+        for sc, rows in compare.items():
+            for m in TABLE_ROWS:
+                if m in rows:
+                    r = rows[m]
+                    lines.append(f"{sc},{m},{r['ade']:.4f},{r['fde']:.4f},{r['exc_ade']:.4f},{r['exc_fde']:.4f},{r['n']},{r['n_exc']}")
+        (HERE / f"comparison_{'_'.join(scenes)}.csv").write_text("\n".join(lines) + "\n")
+        print("saved", HERE / f"comparison_{'_'.join(scenes)}.csv")
+
+
+def print_comparison(compare):
+    """One block per scene: model x ADE / FDE / excADE / excFDE (best in column marked *)."""
+    print("\n" + "=" * 78)
+    print("Comparison with baselines  (exc* = exception slice, q=%.2f, same for all models)" % REPORT_Q)
+    print("=" * 78)
+    for sc, rows in compare.items():
+        best = {c: min(r[c] for r in rows.values() if np.isfinite(r[c])) for c in ("ade", "fde", "exc_ade", "exc_fde")}
+        any_row = next(iter(rows.values()))
+        print(f"\n[{sc}]  n={any_row['n']}  exception slice n={any_row['n_exc']}")
+        print(f"  {'model':<22}{'ADE':>10}{'FDE':>10}{'excADE':>10}{'excFDE':>10}")
+        for m in TABLE_ROWS:
+            if m not in rows:
+                print(f"  {m:<22}{'-':>10}{'-':>10}{'-':>10}{'-':>10}   (not available for this scene)")
+                continue
+            r = rows[m]
+            cell = lambda c: (f"{r[c]:.4f}" + ("*" if np.isclose(r[c], best[c]) else " ")).rjust(10)
+            note = "" if (r["n"], r["n_exc"]) == (any_row["n"], any_row["n_exc"]) else f"   (n={r['n']}, exc n={r['n_exc']})"
+            print(f"  {m:<22}" + "".join(cell(c) for c in ("ade", "fde", "exc_ade", "exc_fde")) + note)
 
 
 if __name__ == "__main__":
